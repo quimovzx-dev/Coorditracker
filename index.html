@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>POSE // TRACKER</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --navy-950: #071626;
+  --navy-900: #0B1E33;
+  --navy-800: #122a45;
+  --navy-700: #1a3958;
+  --cyan: #3FA9F5;
+  --cyan-dim: rgba(63, 169, 245, 0.35);
+  --amber: #F2A93B;
+  --red: #E5484D;
+  --ink: #E8EEF5;
+  --slate: #7C93AC;
+  --slate-dim: #4a607f;
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --radius: 3px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--navy-900); color: var(--ink); font-family: var(--font-mono); min-height: 100vh; }
+.grid-backdrop {
+  position: fixed; inset: 0; z-index: -1;
+  background-image: linear-gradient(var(--navy-800) 1px, transparent 1px), linear-gradient(90deg, var(--navy-800) 1px, transparent 1px);
+  background-size: 32px 32px; background-position: center;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 20%, black 40%, transparent 90%);
+  opacity: 0.5;
+}
+@media (prefers-reduced-motion: no-preference) { .status-dot.is-pulsing { animation: pulse 1.8s ease-in-out infinite; } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+.app-header { display: flex; justify-content: space-between; align-items: center; padding: 24px clamp(16px, 4vw, 48px) 12px; flex-wrap: wrap; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand-mark { font-size: 28px; color: var(--cyan); line-height: 1; }
+.brand-text h1 { font-family: var(--font-display); font-size: clamp(20px, 3vw, 26px); font-weight: 600; letter-spacing: 0.02em; margin: 0; }
+.brand-slash { color: var(--amber); margin: 0 2px; }
+.brand-sub { margin: 2px 0 0; font-size: 11px; letter-spacing: 0.08em; color: var(--slate); text-transform: uppercase; }
+
+.status-chip { display: flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: 0.06em; color: var(--slate); border: 1px solid var(--navy-700); padding: 6px 12px; border-radius: var(--radius); background: rgba(11, 30, 51, 0.6); max-width: 260px; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); flex-shrink: 0; }
+.status-chip.is-ready { color: var(--cyan); } .status-chip.is-ready .status-dot { background: var(--cyan); }
+.status-chip.is-error { color: var(--red); } .status-chip.is-error .status-dot { background: var(--red); }
+
+.mode-switch { display: flex; gap: 2px; padding: 0 clamp(16px, 4vw, 48px); margin-top: 8px; border-bottom: 1px solid var(--navy-700); }
+.mode-btn { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.06em; background: none; border: none; color: var(--slate); padding: 12px 18px; cursor: pointer; border-bottom: 2px solid transparent; transform: translateY(1px); }
+.mode-idx { color: var(--slate-dim); margin-right: 6px; }
+.mode-btn:hover { color: var(--ink); }
+.mode-btn.is-active { color: var(--cyan); border-bottom-color: var(--cyan); }
+.mode-btn.is-active .mode-idx { color: var(--cyan); }
+
+.stage { padding: clamp(16px, 3vw, 32px) clamp(16px, 4vw, 48px) 8px; }
+.panel-view { display: none; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: 24px; }
+.panel-view.is-active { display: grid; }
+@media (max-width: 860px) { .panel-view { grid-template-columns: 1fr; } }
+
+.viewport-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.viewport { position: relative; width: 100%; aspect-ratio: 4 / 3; background: var(--navy-950); border: 1px solid var(--navy-700); border-radius: var(--radius); overflow: hidden; }
+.viewport video, .viewport img { width: 100%; height: 100%; object-fit: contain; display: block; background: var(--navy-950); }
+.viewport canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.reticle { position: absolute; width: 18px; height: 18px; border: 2px solid var(--cyan-dim); pointer-events: none; z-index: 3; }
+.reticle.tl { top: 8px; left: 8px; border-right: none; border-bottom: none; }
+.reticle.tr { top: 8px; right: 8px; border-left: none; border-bottom: none; }
+.reticle.bl { bottom: 8px; left: 8px; border-right: none; border-top: none; }
+.reticle.br { bottom: 8px; right: 8px; border-left: none; border-top: none; }
+
+.viewport-placeholder { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: var(--navy-950); color: var(--slate); text-align: center; padding: 20px; }
+.viewport-placeholder.is-hidden { display: none; }
+.placeholder-icon { font-size: 30px; color: var(--slate-dim); }
+.viewport-placeholder p { margin: 0; font-size: 13px; }
+.placeholder-error { color: var(--red); font-size: 11px; max-width: 320px; }
+.hud-stats { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; gap: 14px; font-size: 10px; letter-spacing: 0.05em; color: var(--cyan); background: rgba(7, 22, 38, 0.75); border: 1px solid var(--navy-700); border-radius: var(--radius); padding: 4px 10px; pointer-events: none; }
+
+.btn { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.05em; padding: 9px 16px; border-radius: var(--radius); border: 1px solid var(--navy-700); background: var(--navy-800); color: var(--ink); cursor: pointer; }
+.btn:hover:not(:disabled) { border-color: var(--cyan); color: var(--cyan); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { background: var(--cyan); color: var(--navy-950); border-color: var(--cyan); font-weight: 600; }
+.btn-primary:hover:not(:disabled) { background: var(--ink); color: var(--navy-950); border-color: var(--ink); }
+.btn-secondary { background: transparent; }
+.btn-ghost { background: transparent; border-color: var(--navy-700); color: var(--slate); }
+.btn-ghost:hover:not(:disabled) { color: var(--amber); border-color: var(--amber); }
+.file-btn { display: inline-flex; align-items: center; }
+
+.control-bar { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; background: var(--navy-800); border: 1px solid var(--navy-700); border-radius: var(--radius); padding: 12px 16px; }
+.slider-control { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 160px; }
+.slider-control label { font-size: 11px; letter-spacing: 0.05em; color: var(--slate); }
+.slider-control span { color: var(--amber); }
+input[type="range"] { -webkit-appearance: none; width: 100%; height: 3px; background: var(--navy-700); border-radius: 2px; outline: none; }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--cyan); cursor: pointer; border: 2px solid var(--navy-950); }
+input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%; background: var(--cyan); cursor: pointer; border: 2px solid var(--navy-950); }
+.checkbox-control { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--slate); cursor: pointer; white-space: nowrap; }
+.checkbox-control input { accent-color: var(--cyan); }
+
+.data-panel { display: flex; flex-direction: column; border: 1px solid var(--navy-700); border-radius: var(--radius); background: var(--navy-800); min-height: 0; overflow: hidden; }
+.data-panel-header { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 16px 10px; border-bottom: 1px solid var(--navy-700); }
+.data-panel-header h2 { font-family: var(--font-display); font-size: 13px; letter-spacing: 0.08em; margin: 0; }
+.data-panel-count { font-size: 11px; color: var(--slate); }
+.data-table-wrap { overflow-y: auto; max-height: 420px; flex: 1; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.data-table thead th { position: sticky; top: 0; background: var(--navy-800); text-align: left; color: var(--slate); font-weight: 500; padding: 6px 10px; border-bottom: 1px solid var(--navy-700); }
+.data-table tbody td { padding: 5px 10px; border-bottom: 1px solid rgba(26, 57, 88, 0.5); white-space: nowrap; }
+.data-table tbody tr:hover { background: var(--navy-700); }
+.data-table td.conf-high { color: var(--cyan); }
+.data-table td.conf-low { color: var(--amber); }
+.data-table .empty-row td { color: var(--slate-dim); text-align: center; padding: 24px 10px; }
+
+.export-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--navy-700); flex-wrap: wrap; }
+.frames-logged { font-size: 11px; color: var(--slate); }
+.export-buttons { display: flex; gap: 8px; }
+
+.app-footer { text-align: center; padding: 28px 16px 32px; color: var(--slate-dim); font-size: 11px; }
+a:focus-visible, button:focus-visible, input:focus-visible, label:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<div class="grid-backdrop"></div>
+
+<header class="app-header">
+  <div class="brand">
+    <span class="brand-mark">◎</span>
+    <div class="brand-text">
+      <h1>POSE<span class="brand-slash">//</span>TRACKER</h1>
+      <p class="brand-sub">33-point skeletal landmark instrument</p>
+    </div>
+  </div>
+  <div class="status-cluster">
+    <div class="status-chip" id="modelStatus">
+      <span class="status-dot is-pulsing"></span>
+      <span id="modelStatusText">Model not loaded yet</span>
+    </div>
+  </div>
+</header>
+
+<nav class="mode-switch" role="tablist">
+  <button class="mode-btn is-active" data-mode="live" role="tab" aria-selected="true">
+    <span class="mode-idx">01</span> LIVE FEED
+  </button>
+  <button class="mode-btn" data-mode="upload" role="tab" aria-selected="false">
+    <span class="mode-idx">02</span> UPLOAD IMAGE
+  </button>
+</nav>
+
+<main class="stage">
+
+  <section class="panel-view is-active" id="view-live">
+    <div class="viewport-col">
+      <div class="viewport" id="liveViewport">
+        <video id="liveVideo" autoplay playsinline muted></video>
+        <canvas id="liveCanvas"></canvas>
+        <div class="reticle tl"></div><div class="reticle tr"></div><div class="reticle bl"></div><div class="reticle br"></div>
+        <div class="viewport-placeholder" id="livePlaceholder">
+          <span class="placeholder-icon">◎</span>
+          <p>Camera feed idle</p>
+          <button class="btn btn-primary" id="startCameraBtn">Start camera</button>
+          <p class="placeholder-error" id="liveErrorText"></p>
+        </div>
+        <div class="hud-stats" id="hudStats">
+          <span id="fpsReadout">-- FPS</span>
+          <span id="poseCountReadout">0 poses</span>
+        </div>
+      </div>
+      <div class="control-bar">
+        <button class="btn btn-secondary" id="toggleCameraBtn" disabled>Stop</button>
+        <button class="btn btn-secondary" id="switchCameraBtn" disabled title="Switch front/back camera">⟲ Flip</button>
+        <div class="slider-control">
+          <label for="confThreshold">Confidence <span id="confValue">0.50</span></label>
+          <input type="range" id="confThreshold" min="0.1" max="0.9" step="0.05" value="0.5" />
+        </div>
+        <label class="checkbox-control"><input type="checkbox" id="showConnections" checked /> Skeleton lines</label>
+        <label class="checkbox-control"><input type="checkbox" id="smoothingToggle" checked /> Smoothing</label>
+        <label class="checkbox-control"><input type="checkbox" id="ghostTrail" /> Ghost trail</label>
+        <label class="checkbox-control"><input type="checkbox" id="multiPose" /> Track 2 people</label>
+        <label class="checkbox-control"><input type="checkbox" id="recordLog" /> Log frames</label>
+      </div>
+    </div>
+    <aside class="data-panel">
+      <div class="data-panel-header"><h2>LANDMARK READOUT</h2><span class="data-panel-count" id="liveTrackedCount">0 / 33 tracked</span></div>
+      <div class="data-table-wrap">
+        <table class="data-table" id="liveDataTable">
+          <thead><tr><th>#</th><th>POINT</th><th>X</th><th>Y</th><th>CONF</th></tr></thead>
+          <tbody id="liveDataBody"><tr class="empty-row"><td colspan="5">No pose detected</td></tr></tbody>
+        </table>
+      </div>
+      <div class="export-row">
+        <span class="frames-logged" id="framesLoggedLabel">0 frames logged</span>
+        <div class="export-buttons">
+          <button class="btn btn-ghost" id="exportLiveJson" disabled>Export JSON</button>
+          <button class="btn btn-ghost" id="exportLiveCsv" disabled>Export CSV</button>
+        </div>
+      </div>
+    </aside>
+  </section>
+
+  <section class="panel-view" id="view-upload">
+    <div class="viewport-col">
+      <div class="viewport" id="uploadViewport">
+        <img id="uploadImage" alt="Uploaded photo for pose tracking" />
+        <canvas id="uploadCanvas"></canvas>
+        <div class="reticle tl"></div><div class="reticle tr"></div><div class="reticle bl"></div><div class="reticle br"></div>
+        <div class="viewport-placeholder" id="uploadPlaceholder">
+          <span class="placeholder-icon">◎</span>
+          <p>Drop an image or choose a file</p>
+          <label class="btn btn-primary file-btn">Choose image<input type="file" id="uploadInput" accept="image/*" hidden /></label>
+          <p class="placeholder-error" id="uploadErrorText"></p>
+        </div>
+      </div>
+      <div class="control-bar">
+        <label class="btn btn-secondary file-btn" id="replaceImageBtn" style="display:none;">Replace image<input type="file" id="uploadInputReplace" accept="image/*" hidden /></label>
+        <div class="slider-control">
+          <label for="confThresholdUpload">Confidence <span id="confValueUpload">0.50</span></label>
+          <input type="range" id="confThresholdUpload" min="0.1" max="0.9" step="0.05" value="0.5" />
+        </div>
+        <label class="checkbox-control"><input type="checkbox" id="showConnectionsUpload" checked /> Skeleton lines</label>
+      </div>
+    </div>
+    <aside class="data-panel">
+      <div class="data-panel-header"><h2>LANDMARK READOUT</h2><span class="data-panel-count" id="uploadTrackedCount">0 / 33 tracked</span></div>
+      <div class="data-table-wrap">
+        <table class="data-table" id="uploadDataTable">
+          <thead><tr><th>#</th><th>POINT</th><th>X</th><th>Y</th><th>CONF</th></tr></thead>
+          <tbody id="uploadDataBody"><tr class="empty-row"><td colspan="5">No pose detected</td></tr></tbody>
+        </table>
+      </div>
+      <div class="export-row">
+        <span class="frames-logged" id="uploadStatusLabel">No image analyzed</span>
+        <div class="export-buttons">
+          <button class="btn btn-ghost" id="exportUploadJson" disabled>Export JSON</button>
+          <button class="btn btn-ghost" id="exportUploadCsv" disabled>Export CSV</button>
+        </div>
+      </div>
+    </aside>
+  </section>
+
+</main>
+
+<footer class="app-footer">
+  <p>Runs entirely in-browser via on-device inference — no frame or image is ever uploaded to a server.</p>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ================================================================
+     Everything in this IIFE is plain, synchronous, dependency-free
+     DOM wiring. It runs immediately and completely on page load,
+     BEFORE anything ever tries to touch the MediaPipe library. This
+     guarantees every button, tab, and slider works even if the pose
+     model never loads at all.
+  ================================================================ */
+
+  const LANDMARK_NAMES = [
+    "nose","left_eye_inner","left_eye","left_eye_outer","right_eye_inner","right_eye","right_eye_outer",
+    "left_ear","right_ear","mouth_left","mouth_right","left_shoulder","right_shoulder","left_elbow","right_elbow",
+    "left_wrist","right_wrist","left_pinky","right_pinky","left_index","right_index","left_thumb","right_thumb",
+    "left_hip","right_hip","left_knee","right_knee","left_ankle","right_ankle","left_heel","right_heel",
+    "left_foot_index","right_foot_index",
+  ];
+
+  const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+  const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+  const MAX_LOGGED_FRAMES = 3000;
+
+  const $ = (id) => document.getElementById(id);
+
+  /* ---------- mode tabs (no dependencies — always works) ---------- */
+  const modeButtons = document.querySelectorAll(".mode-btn");
+  const panelViews = { live: $("view-live"), upload: $("view-upload") };
+  modeButtons.forEach((btn) => {
+    btn.addEventListener("click", function () {
+      modeButtons.forEach((b) => { b.classList.remove("is-active"); b.setAttribute("aria-selected", "false"); });
+      btn.classList.add("is-active");
+      btn.setAttribute("aria-selected", "true");
+      Object.values(panelViews).forEach((v) => v.classList.remove("is-active"));
+      panelViews[btn.dataset.mode].classList.add("is-active");
+    });
+  });
+
+  /* ---------- geometry helpers ---------- */
+  function getContainRect(containerW, containerH, mediaW, mediaH) {
+    const containerRatio = containerW / containerH;
+    const mediaRatio = mediaW / mediaH;
+    let renderW, renderH, offsetX, offsetY;
+    if (mediaRatio > containerRatio) {
+      renderW = containerW; renderH = containerW / mediaRatio; offsetX = 0; offsetY = (containerH - renderH) / 2;
+    } else {
+      renderH = containerH; renderW = containerH * mediaRatio; offsetY = 0; offsetX = (containerW - renderW) / 2;
+    }
+    return { renderW, renderH, offsetX, offsetY };
+  }
+
+  function resizeCanvasToContainer(canvas, container) {
+    const dpr = window.devicePixelRatio || 1;
+    const w = container.clientWidth, h = container.clientHeight;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    canvas.style.width = w + "px"; canvas.style.height = h + "px";
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { w, h };
+  }
+
+  function drawSkeleton(ctx, landmarks, rect, threshold, showConnections, connections) {
+    const { renderW, renderH, offsetX, offsetY } = rect;
+    const toPixel = (lm) => [offsetX + lm.x * renderW, offsetY + lm.y * renderH];
+
+    if (showConnections && connections) {
+      ctx.strokeStyle = "rgba(63, 169, 245, 0.85)";
+      ctx.lineWidth = 2;
+      ctx.shadowColor = "rgba(63, 169, 245, 0.6)";
+      ctx.shadowBlur = 6;
+      connections.forEach(({ start, end }) => {
+        const a = landmarks[start], b = landmarks[end];
+        if (!a || !b) return;
+        if ((a.visibility ?? 1) < threshold || (b.visibility ?? 1) < threshold) return;
+        const [ax, ay] = toPixel(a), [bx, by] = toPixel(b);
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      });
+    }
+    ctx.shadowBlur = 0;
+    landmarks.forEach((lm) => {
+      const vis = lm.visibility ?? 1;
+      if (vis < threshold) return;
+      const [x, y] = toPixel(lm);
+      ctx.beginPath();
+      ctx.fillStyle = "#F2A93B";
+      ctx.shadowColor = "rgba(242, 169, 59, 0.85)";
+      ctx.shadowBlur = 8;
+      ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.shadowBlur = 0;
+  }
+
+  function populateTable(tbody, countLabel, landmarks, threshold) {
+    if (!landmarks) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="5">No pose detected</td></tr>';
+      countLabel.textContent = "0 / 33 tracked";
+      return;
+    }
+    let tracked = 0;
+    const rows = landmarks.map((lm, i) => {
+      const vis = lm.visibility ?? 1;
+      if (vis >= threshold) tracked++;
+      const cls = vis >= threshold ? "conf-high" : "conf-low";
+      return "<tr><td>" + i + "</td><td>" + LANDMARK_NAMES[i] + "</td><td>" + lm.x.toFixed(3) + "</td><td>" + lm.y.toFixed(3) + "</td><td class=\"" + cls + "\">" + vis.toFixed(2) + "</td></tr>";
+    });
+    tbody.innerHTML = rows.join("");
+    countLabel.textContent = tracked + " / 33 tracked";
+  }
+
+  function downloadBlob(filename, content, mime) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function framesToCsv(frames) {
+    const lines = ["frame,timestamp_ms,landmark_index,landmark_name,x,y,z,visibility"];
+    frames.forEach((frame, fi) => {
+      frame.landmarks.forEach((lm, i) => {
+        lines.push([fi, frame.t.toFixed(1), i, LANDMARK_NAMES[i], lm.x.toFixed(5), lm.y.toFixed(5), lm.z.toFixed(5), (lm.visibility ?? 1).toFixed(3)].join(","));
+      });
+    });
+    return lines.join("\n");
+  }
+
+  function landmarksToCsv(landmarks) {
+    const lines = ["landmark_index,landmark_name,x,y,z,visibility"];
+    landmarks.forEach((lm, i) => {
+      lines.push([i, LANDMARK_NAMES[i], lm.x.toFixed(5), lm.y.toFixed(5), lm.z.toFixed(5), (lm.visibility ?? 1).toFixed(3)].join(","));
+    });
+    return lines.join("\n");
+  }
+
+  /* ================================================================
+     MediaPipe loading — fully isolated. Every function here is only
+     ever called from inside a try/catch. If any part of this fails,
+     the UI above keeps working and just shows an error message.
+  ================================================================ */
+
+  let mpModule = null;
+  let visionResolver = null;
+  let liveLandmarker = null;
+  let imageLandmarker = null;
+  let poseConnections = null;
+  let usedDelegate = "GPU";
+
+  async function loadMediapipe() {
+    if (mpModule) return mpModule;
+    mpModule = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm");
+    poseConnections = mpModule.PoseLandmarker.POSE_CONNECTIONS;
+    return mpModule;
+  }
+
+  async function getVisionResolver() {
+    if (visionResolver) return visionResolver;
+    const mod = await loadMediapipe();
+    visionResolver = await mod.FilesetResolver.forVisionTasks(WASM_URL);
+    return visionResolver;
+  }
+
+  async function createLandmarker(runningMode, numPoses) {
+    const mod = await loadMediapipe();
+    const vision = await getVisionResolver();
+    try {
+      return await mod.PoseLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
+        runningMode, numPoses: numPoses || 1,
+      });
+    } catch (gpuErr) {
+      console.warn("GPU delegate failed, falling back to CPU:", gpuErr);
+      usedDelegate = "CPU";
+      return await mod.PoseLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },
+        runningMode, numPoses: numPoses || 1,
+      });
+    }
+  }
+
+  async function getLiveLandmarker(numPoses) {
+    if (liveLandmarker) return liveLandmarker;
+    liveLandmarker = await createLandmarker("VIDEO", numPoses);
+    return liveLandmarker;
+  }
+
+  async function getImageLandmarker() {
+    if (imageLandmarker) return imageLandmarker;
+    imageLandmarker = await createLandmarker("IMAGE");
+    return imageLandmarker;
+  }
+
+  function describeError(err) {
+    const msg = (err && err.message) || String(err);
+    if (/wasm|memory/i.test(msg)) return "Could not load the pose model's WASM runtime. Try a different browser or check your connection.";
+    if (/network|fetch|Failed to fetch/i.test(msg)) return "Network error loading the pose model. Check your connection and retry.";
+    return "Pose model failed to load: " + msg;
+  }
+
+  const modelStatus = $("modelStatus");
+  const modelStatusText = $("modelStatusText");
+  const modelStatusDot = modelStatus.querySelector(".status-dot");
+
+  function setStatus(state, text) {
+    modelStatus.classList.remove("is-ready", "is-error");
+    if (state) modelStatus.classList.add(state);
+    modelStatusDot.classList.toggle("is-pulsing", state !== "is-ready" && state !== "is-error");
+    modelStatusText.textContent = text;
+  }
+
+  let modelReady = false;
+  (async function initModel() {
+    setStatus(null, "Loading pose model…");
+    try {
+      await getLiveLandmarker(1);
+      modelReady = true;
+      setStatus("is-ready", "MODEL READY (" + usedDelegate + ")");
+    } catch (err) {
+      console.error("Initial model load failed:", err);
+      setStatus("is-error", "Model failed to load — tap Start camera to retry");
+    }
+  })();
+
+  /* ================= LIVE MODE ================= */
+
+  const liveVideo = $("liveVideo");
+  const liveCanvas = $("liveCanvas");
+  const liveViewport = $("liveViewport");
+  const livePlaceholder = $("livePlaceholder");
+  const liveErrorText = $("liveErrorText");
+  const startCameraBtn = $("startCameraBtn");
+  const toggleCameraBtn = $("toggleCameraBtn");
+  const switchCameraBtn = $("switchCameraBtn");
+  const confThreshold = $("confThreshold");
+  const confValue = $("confValue");
+  const showConnections = $("showConnections");
+  const smoothingToggle = $("smoothingToggle");
+  const ghostTrail = $("ghostTrail");
+  const multiPose = $("multiPose");
+  const recordLog = $("recordLog");
+  const liveDataBody = $("liveDataBody");
+  const liveTrackedCount = $("liveTrackedCount");
+  const framesLoggedLabel = $("framesLoggedLabel");
+  const exportLiveJson = $("exportLiveJson");
+  const exportLiveCsv = $("exportLiveCsv");
+  const fpsReadout = $("fpsReadout");
+  const poseCountReadout = $("poseCountReadout");
+
+  let liveStream = null;
+  let liveRunning = false;
+  let loggedFrames = [];
+  let currentFacingMode = "user";
+  let smoothedByPose = [];
+  let fpsSmoothed = 0;
+  let lastFrameTime = performance.now();
+
+  const SMOOTHING_FACTOR = 0.55; // higher = smoother but more lag
+
+  function smoothLandmarks(poseIndex, rawLandmarks) {
+    if (!smoothingToggle.checked) { smoothedByPose[poseIndex] = null; return rawLandmarks; }
+    const prev = smoothedByPose[poseIndex];
+    if (!prev || prev.length !== rawLandmarks.length) {
+      smoothedByPose[poseIndex] = rawLandmarks.map((l) => Object.assign({}, l));
+      return smoothedByPose[poseIndex];
+    }
+    const out = rawLandmarks.map((lm, i) => {
+      const p = prev[i];
+      const a = SMOOTHING_FACTOR;
+      return {
+        x: p.x * a + lm.x * (1 - a),
+        y: p.y * a + lm.y * (1 - a),
+        z: p.z * a + lm.z * (1 - a),
+        visibility: lm.visibility,
+      };
+    });
+    smoothedByPose[poseIndex] = out;
+    return out;
+  }
+
+  confThreshold.addEventListener("input", () => { confValue.textContent = Number(confThreshold.value).toFixed(2); });
+
+  async function startCamera(facingMode) {
+    liveErrorText.textContent = "";
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      liveErrorText.textContent = "This browser doesn't support camera access.";
+      return;
+    }
+    if (liveStream) { liveStream.getTracks().forEach((t) => t.stop()); liveStream = null; }
+    const mode = facingMode || currentFacingMode;
+    try {
+      liveStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 960 }, facingMode: { ideal: mode } },
+      });
+    } catch (err) {
+      // some devices reject a facingMode they don't have — retry with no constraint
+      try {
+        liveStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 960 } } });
+      } catch (err2) {
+        liveErrorText.textContent = "Camera access denied or unavailable.";
+        console.error(err2);
+        return;
+      }
+    }
+    currentFacingMode = mode;
+    liveVideo.srcObject = liveStream;
+    await liveVideo.play();
+    livePlaceholder.classList.add("is-hidden");
+    toggleCameraBtn.disabled = false;
+    toggleCameraBtn.textContent = "Stop";
+    switchCameraBtn.disabled = false;
+    liveRunning = true;
+    smoothedByPose = [];
+    requestAnimationFrame(liveLoop);
+  }
+
+  function stopCamera() {
+    liveRunning = false;
+    if (liveStream) { liveStream.getTracks().forEach((t) => t.stop()); liveStream = null; }
+    livePlaceholder.classList.remove("is-hidden");
+    toggleCameraBtn.textContent = "Start";
+    switchCameraBtn.disabled = true;
+    const ctx = liveCanvas.getContext("2d");
+    ctx.clearRect(0, 0, liveCanvas.width, liveCanvas.height);
+    fpsReadout.textContent = "-- FPS";
+    poseCountReadout.textContent = "0 poses";
+  }
+
+  startCameraBtn.addEventListener("click", () => startCamera());
+  toggleCameraBtn.addEventListener("click", () => { liveRunning ? stopCamera() : startCamera(); });
+  switchCameraBtn.addEventListener("click", () => {
+    const next = currentFacingMode === "user" ? "environment" : "user";
+    startCamera(next);
+  });
+
+  multiPose.addEventListener("change", () => {
+    liveLandmarker = null; // force recreation with new numPoses on next detect
+    smoothedByPose = [];
+  });
+
+  async function liveLoop() {
+    if (!liveRunning) return;
+    if (liveVideo.readyState >= 2 && liveVideo.videoWidth > 0) {
+      let landmarker;
+      try {
+        landmarker = await getLiveLandmarker(multiPose.checked ? 2 : 1);
+        if (!modelReady) { modelReady = true; setStatus("is-ready", "MODEL READY (" + usedDelegate + ")"); }
+      } catch (err) {
+        setStatus("is-error", describeError(err));
+        requestAnimationFrame(liveLoop);
+        return;
+      }
+
+      const now = performance.now();
+      const result = landmarker.detectForVideo(liveVideo, now);
+      const delta = now - lastFrameTime;
+      lastFrameTime = now;
+      const instFps = delta > 0 ? 1000 / delta : 0;
+      fpsSmoothed = fpsSmoothed ? fpsSmoothed * 0.9 + instFps * 0.1 : instFps;
+      fpsReadout.textContent = Math.round(fpsSmoothed) + " FPS";
+
+      const { w, h } = resizeCanvasToContainer(liveCanvas, liveViewport);
+      const ctx = liveCanvas.getContext("2d");
+      if (ghostTrail.checked) {
+        ctx.fillStyle = "rgba(7, 22, 38, 0.25)";
+        ctx.fillRect(0, 0, w, h);
+      } else {
+        ctx.clearRect(0, 0, w, h);
+      }
+
+      const threshold = Number(confThreshold.value);
+      const rawPoses = result.landmarks || [];
+      poseCountReadout.textContent = rawPoses.length + (rawPoses.length === 1 ? " pose" : " poses");
+
+      const rect = getContainRect(w, h, liveVideo.videoWidth, liveVideo.videoHeight);
+      const smoothedPoses = rawPoses.map((lm, i) => smoothLandmarks(i, lm));
+      smoothedPoses.forEach((lm) => {
+        drawSkeleton(ctx, lm, rect, threshold, showConnections.checked, poseConnections);
+      });
+
+      const primaryLandmarks = smoothedPoses[0] || null;
+      if (primaryLandmarks && recordLog.checked) {
+        loggedFrames.push({ t: now, landmarks: primaryLandmarks.map((l) => Object.assign({}, l)) });
+        if (loggedFrames.length > MAX_LOGGED_FRAMES) loggedFrames.shift();
+        framesLoggedLabel.textContent = loggedFrames.length + " frames logged";
+        exportLiveJson.disabled = false;
+        exportLiveCsv.disabled = false;
+      }
+      populateTable(liveDataBody, liveTrackedCount, primaryLandmarks, threshold);
+    }
+    requestAnimationFrame(liveLoop);
+  }
+
+  new ResizeObserver(() => { if (liveRunning) resizeCanvasToContainer(liveCanvas, liveViewport); }).observe(liveViewport);
+
+  exportLiveJson.addEventListener("click", () => {
+    downloadBlob("pose-session-" + Date.now() + ".json", JSON.stringify({ landmark_names: LANDMARK_NAMES, frames: loggedFrames }, null, 2), "application/json");
+  });
+  exportLiveCsv.addEventListener("click", () => {
+    downloadBlob("pose-session-" + Date.now() + ".csv", framesToCsv(loggedFrames), "text/csv");
+  });
+
+  /* ================= UPLOAD MODE ================= */
+
+  const uploadViewport = $("uploadViewport");
+  const uploadImage = $("uploadImage");
+  const uploadCanvas = $("uploadCanvas");
+  const uploadPlaceholder = $("uploadPlaceholder");
+  const uploadErrorText = $("uploadErrorText");
+  const uploadInput = $("uploadInput");
+  const uploadInputReplace = $("uploadInputReplace");
+  const replaceImageBtn = $("replaceImageBtn");
+  const confThresholdUpload = $("confThresholdUpload");
+  const confValueUpload = $("confValueUpload");
+  const showConnectionsUpload = $("showConnectionsUpload");
+  const uploadDataBody = $("uploadDataBody");
+  const uploadTrackedCount = $("uploadTrackedCount");
+  const uploadStatusLabel = $("uploadStatusLabel");
+  const exportUploadJson = $("exportUploadJson");
+  const exportUploadCsv = $("exportUploadCsv");
+
+  let currentImageLandmarks = null;
+
+  confThresholdUpload.addEventListener("input", () => {
+    confValueUpload.textContent = Number(confThresholdUpload.value).toFixed(2);
+    if (currentImageLandmarks) renderUploadResult();
+  });
+  showConnectionsUpload.addEventListener("change", () => { if (currentImageLandmarks) renderUploadResult(); });
+
+  function renderUploadResult() {
+    const { w, h } = resizeCanvasToContainer(uploadCanvas, uploadViewport);
+    const ctx = uploadCanvas.getContext("2d");
+    ctx.clearRect(0, 0, w, h);
+    const threshold = Number(confThresholdUpload.value);
+    if (currentImageLandmarks) {
+      const rect = getContainRect(w, h, uploadImage.naturalWidth, uploadImage.naturalHeight);
+      drawSkeleton(ctx, currentImageLandmarks, rect, threshold, showConnectionsUpload.checked, poseConnections);
+    }
+    populateTable(uploadDataBody, uploadTrackedCount, currentImageLandmarks, threshold);
+  }
+
+  async function handleImageFile(file) {
+    if (!file) return;
+    uploadErrorText.textContent = "";
+    uploadStatusLabel.textContent = "Analyzing…";
+    const url = URL.createObjectURL(file);
+    await new Promise((resolve, reject) => {
+      uploadImage.onload = resolve;
+      uploadImage.onerror = reject;
+      uploadImage.src = url;
+    }).catch(() => { uploadStatusLabel.textContent = "Couldn't load that image file."; });
+
+    uploadPlaceholder.classList.add("is-hidden");
+    replaceImageBtn.style.display = "inline-flex";
+
+    let landmarker;
+    try {
+      landmarker = await getImageLandmarker();
+      if (!modelReady) { modelReady = true; setStatus("is-ready", "MODEL READY (" + usedDelegate + ")"); }
+    } catch (err) {
+      uploadStatusLabel.textContent = "Model failed to load — check connection and retry.";
+      uploadErrorText.textContent = describeError(err);
+      console.error(err);
+      return;
+    }
+
+    const result = landmarker.detect(uploadImage);
+    currentImageLandmarks = (result.landmarks && result.landmarks[0]) || null;
+    renderUploadResult();
+
+    if (currentImageLandmarks) {
+      uploadStatusLabel.textContent = "Pose detected";
+      exportUploadJson.disabled = false;
+      exportUploadCsv.disabled = false;
+    } else {
+      uploadStatusLabel.textContent = "No pose detected in image";
+      exportUploadJson.disabled = true;
+      exportUploadCsv.disabled = true;
+    }
+  }
+
+  uploadInput.addEventListener("change", (e) => handleImageFile(e.target.files[0]));
+  uploadInputReplace.addEventListener("change", (e) => handleImageFile(e.target.files[0]));
+
+  ["dragover", "dragenter"].forEach((evt) => uploadViewport.addEventListener(evt, (e) => { e.preventDefault(); uploadViewport.style.borderColor = "var(--cyan)"; }));
+  ["dragleave", "drop"].forEach((evt) => uploadViewport.addEventListener(evt, (e) => { e.preventDefault(); uploadViewport.style.borderColor = ""; }));
+  uploadViewport.addEventListener("drop", (e) => {
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file && file.type.startsWith("image/")) handleImageFile(file);
+  });
+
+  new ResizeObserver(() => { if (currentImageLandmarks) renderUploadResult(); }).observe(uploadViewport);
+
+  exportUploadJson.addEventListener("click", () => {
+    downloadBlob("pose-image-" + Date.now() + ".json", JSON.stringify({ landmark_names: LANDMARK_NAMES, landmarks: currentImageLandmarks }, null, 2), "application/json");
+  });
+  exportUploadCsv.addEventListener("click", () => {
+    downloadBlob("pose-image-" + Date.now() + ".csv", landmarksToCsv(currentImageLandmarks), "text/csv");
+  });
+
+})();
+</script>
+</body>
+</html>
